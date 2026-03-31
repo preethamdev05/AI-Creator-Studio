@@ -63,6 +63,7 @@ service cloud.firestore {
     //   - status: string (required, enum: ['queued', 'processing', 'completed', 'failed'])
     //   - payload: string (optional)
     //   - result: string (optional)
+    //   - progress: number (optional)
     //   - createdAt: string (required, immutable)
     //   - updatedAt: string (required)
     //
@@ -165,7 +166,7 @@ service cloud.firestore {
     }
 
     function isValidScene(data) {
-      let allowedFields = ['id', 'projectId', 'ownerId', 'order', 'script', 'imagePrompt', 'voicePrompt', 'imageUrl', 'audioUrl', 'videoUrl', 'status'];
+      let allowedFields = ['id', 'projectId', 'ownerId', 'order', 'script', 'imagePrompt', 'voicePrompt', 'imageUrl', 'audioUrl', 'videoUrl', 'scenePlan', 'captions', 'status'];
       return hasOnlyAllowedFields(allowedFields) &&
              hasRequiredFields(['id', 'projectId', 'ownerId', 'order', 'script', 'status']) &&
              data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
@@ -178,6 +179,8 @@ service cloud.firestore {
              (!('imageUrl' in data) || (isValidUrl(data.imageUrl) && data.imageUrl.size() <= 1000)) &&
              (!('audioUrl' in data) || (isValidUrl(data.audioUrl) && data.audioUrl.size() <= 1000)) &&
              (!('videoUrl' in data) || (isValidUrl(data.videoUrl) && data.videoUrl.size() <= 1000)) &&
+             (!('scenePlan' in data) || (data.scenePlan is string && data.scenePlan.size() <= 10000)) &&
+             (!('captions' in data) || (data.captions is string && data.captions.size() <= 10000)) &&
              data.status in ['pending', 'generating', 'completed', 'failed'];
     }
 
@@ -194,7 +197,7 @@ service cloud.firestore {
     }
 
     function isValidJob(data) {
-      let allowedFields = ['id', 'ownerId', 'projectId', 'type', 'status', 'payload', 'result', 'createdAt', 'updatedAt'];
+      let allowedFields = ['id', 'ownerId', 'projectId', 'type', 'status', 'payload', 'result', 'progress', 'createdAt', 'updatedAt'];
       return hasOnlyAllowedFields(allowedFields) &&
              hasRequiredFields(['id', 'ownerId', 'projectId', 'type', 'status', 'createdAt', 'updatedAt']) &&
              data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
@@ -204,6 +207,7 @@ service cloud.firestore {
              data.status in ['queued', 'processing', 'completed', 'failed'] &&
              (!('payload' in data) || (data.payload is string && data.payload.size() <= 10000)) &&
              (!('result' in data) || (data.result is string && data.result.size() <= 10000)) &&
+             (!('progress' in data) || (data.progress is number && data.progress >= 0 && data.progress <= 100)) &&
              data.createdAt is string && data.createdAt.size() <= 50 &&
              data.updatedAt is string && data.updatedAt.size() <= 50;
     }

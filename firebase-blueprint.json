@@ -47,6 +47,8 @@
         "imageUrl": { "type": "string" },
         "audioUrl": { "type": "string" },
         "videoUrl": { "type": "string" },
+        "scenePlan": { "type": "string" },
+        "captions": { "type": "string" },
         "status": { "type": "string", "enum": ["pending", "generating", "completed", "failed"] }
       },
       "required": ["id", "projectId", "ownerId", "order", "script", "status"]
@@ -77,6 +79,7 @@
         "status": { "type": "string", "enum": ["queued", "processing", "completed", "failed"] },
         "payload": { "type": "string" },
         "result": { "type": "string" },
+        "progress": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

@@ -1,15 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { db } from '@/lib/firebase';
-import { collection, doc, setDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, doc, setDoc, getDocs, query, where, onSnapshot } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '@/lib/firestore-utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Wand2, Loader2, Play, Image as ImageIcon, Mic, Video } from 'lucide-react';
+import { Wand2, Loader2, Play, Image as ImageIcon, Mic, Video, Type, ListTree } from 'lucide-react';
 import { toast } from 'sonner';
 
 export function StudioTab() {
@@ -20,21 +20,76 @@ export function StudioTab() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedScript, setGeneratedScript] = useState('');
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [renderProgress, setRenderProgress] = useState<number | null>(null);
+  const [renderStatus, setRenderStatus] = useState<string | null>(null);
+  const [scenes, setScenes] = useState<any[]>([]);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!currentProjectId || !user) return;
+
+    const q = query(
+      collection(db, 'jobs'),
+      where('projectId', '==', currentProjectId),
+      where('type', '==', 'ffmpeg_render')
+    );
+
+    const unsubscribeJobs = onSnapshot(q, (snapshot) => {
+      if (!snapshot.empty) {
+        // Get the most recent render job
+        const jobDocs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
+        jobDocs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        const latestJob = jobDocs[0];
+        
+        setRenderStatus(latestJob.status);
+        if (latestJob.progress !== undefined) {
+          setRenderProgress(latestJob.progress);
+        }
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'jobs');
+    });
+
+    const scenesQuery = query(
+      collection(db, 'scenes'),
+      where('projectId', '==', currentProjectId)
+    );
+
+    const unsubscribeScenes = onSnapshot(scenesQuery, (snapshot) => {
+      const sceneDocs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      sceneDocs.sort((a, b) => a.order - b.order);
+      setScenes(sceneDocs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'scenes');
+    });
+
+    const assetsQuery = query(
+      collection(db, 'assets'),
+      where('projectId', '==', currentProjectId),
+      where('type', '==', 'video')
+    );
+
+    const unsubscribeAssets = onSnapshot(assetsQuery, (snapshot) => {
+      if (!snapshot.empty) {
+        const assetDocs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
+        assetDocs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setVideoUrl(assetDocs[0].url);
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'assets');
+    });
+
+    return () => {
+      unsubscribeJobs();
+      unsubscribeScenes();
+      unsubscribeAssets();
+    };
+  }, [currentProjectId, user]);
 
   const handleGenerateVisuals = async () => {
     if (!currentProjectId) return;
     toast.info('Queuing visual generation...');
     try {
-      // Get the first scene for this project
-      const scenesSnapshot = await getDocs(query(collection(db, 'scenes'), where('projectId', '==', currentProjectId)));
-      if (scenesSnapshot.empty) {
-        toast.error('No scenes found to generate visuals for.');
-        return;
-      }
-      
-      const sceneDoc = scenesSnapshot.docs[0];
-      const sceneData = sceneDoc.data();
-      
       const jobRef = doc(collection(db, 'jobs'));
       await setDoc(jobRef, {
         id: jobRef.id,
@@ -45,8 +100,7 @@ export function StudioTab() {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         payload: JSON.stringify({
-          sceneId: sceneDoc.id,
-          imagePrompt: sceneData.imagePrompt || sceneData.script,
+          projectId: currentProjectId,
         }),
       }).catch(e => handleFirestoreError(e, OperationType.CREATE, 'jobs'));
 
@@ -63,15 +117,6 @@ export function StudioTab() {
     if (!currentProjectId) return;
     toast.info('Queuing voice synthesis...');
     try {
-      const scenesSnapshot = await getDocs(query(collection(db, 'scenes'), where('projectId', '==', currentProjectId)));
-      if (scenesSnapshot.empty) {
-        toast.error('No scenes found to generate voice for.');
-        return;
-      }
-      
-      const sceneDoc = scenesSnapshot.docs[0];
-      const sceneData = sceneDoc.data();
-      
       const jobRef = doc(collection(db, 'jobs'));
       await setDoc(jobRef, {
         id: jobRef.id,
@@ -82,8 +127,7 @@ export function StudioTab() {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         payload: JSON.stringify({
-          sceneId: sceneDoc.id,
-          voicePrompt: sceneData.voicePrompt || sceneData.script,
+          projectId: currentProjectId,
         }),
       }).catch(e => handleFirestoreError(e, OperationType.CREATE, 'jobs'));
 
@@ -95,6 +139,85 @@ export function StudioTab() {
       toast.error('Failed to queue voice synthesis');
     }
   };
+  const handleGenerateCaptions = async () => {
+    if (!currentProjectId) return;
+    toast.info('Queuing caption generation...');
+    try {
+      const jobRef = doc(collection(db, 'jobs'));
+      await setDoc(jobRef, {
+        id: jobRef.id,
+        projectId: currentProjectId,
+        ownerId: user?.uid,
+        type: 'ai_captions',
+        status: 'queued',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        payload: JSON.stringify({
+          projectId: currentProjectId,
+        }),
+      }).catch(e => handleFirestoreError(e, OperationType.CREATE, 'jobs'));
+
+      fetch('/api/jobs/process', { method: 'POST' });
+      toast.success('Caption generation queued!');
+    } catch (error: any) {
+      console.error(error);
+      toast.error('Failed to queue caption generation');
+    }
+  };
+
+  const handleGenerateScenePlan = async () => {
+    if (!currentProjectId) return;
+    toast.info('Queuing scene plan generation...');
+    try {
+      const jobRef = doc(collection(db, 'jobs'));
+      await setDoc(jobRef, {
+        id: jobRef.id,
+        projectId: currentProjectId,
+        ownerId: user?.uid,
+        type: 'ai_scene_plan',
+        status: 'queued',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        payload: JSON.stringify({
+          projectId: currentProjectId,
+        }),
+      }).catch(e => handleFirestoreError(e, OperationType.CREATE, 'jobs'));
+
+      fetch('/api/jobs/process', { method: 'POST' });
+      toast.success('Scene plan generation queued!');
+    } catch (error: any) {
+      console.error(error);
+      toast.error('Failed to queue scene plan generation');
+    }
+  };
+
+  const handleRenderVideo = async () => {
+    if (!currentProjectId) return;
+    toast.info('Queuing video rendering...');
+    try {
+      const jobRef = doc(collection(db, 'jobs'));
+      await setDoc(jobRef, {
+        id: jobRef.id,
+        projectId: currentProjectId,
+        ownerId: user?.uid,
+        type: 'ffmpeg_render',
+        status: 'queued',
+        progress: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        payload: JSON.stringify({
+          projectId: currentProjectId,
+        }),
+      }).catch(e => handleFirestoreError(e, OperationType.CREATE, 'jobs'));
+
+      fetch('/api/jobs/process', { method: 'POST' });
+      toast.success('Video rendering queued!');
+    } catch (error: any) {
+      console.error(error);
+      toast.error('Failed to queue video rendering');
+    }
+  };
+
   const handleGenerate = async () => {
     if (!prompt.trim()) {
       toast.error('Please enter a prompt');
@@ -233,35 +356,128 @@ export function StudioTab() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="bg-zinc-950 p-4 rounded-lg border border-zinc-800 font-mono text-sm text-zinc-300 whitespace-pre-wrap">
+                <div className="bg-zinc-950 p-4 rounded-lg border border-zinc-800 font-mono text-sm text-zinc-300 whitespace-pre-wrap max-h-[300px] overflow-y-auto">
                   {generatedScript}
                 </div>
+                
+                {scenes.length > 0 && (
+                  <div className="mt-6 space-y-4">
+                    <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-wider">Scenes ({scenes.length})</h4>
+                    <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+                      {scenes.map((scene, idx) => (
+                        <div key={scene.id} className="bg-zinc-950 border border-zinc-800 rounded-lg p-4 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium text-indigo-400">Scene {idx + 1}</span>
+                            <span className="text-xs px-2 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400">
+                              {scene.status}
+                            </span>
+                          </div>
+                          
+                          <div className="text-sm text-zinc-300">
+                            <span className="text-zinc-500 block mb-1">Script:</span>
+                            {scene.script}
+                          </div>
+                          
+                          {scene.scenePlan && (
+                            <div className="text-sm text-zinc-300 border-t border-zinc-800 pt-2">
+                              <span className="text-zinc-500 block mb-1">Scene Plan:</span>
+                              {scene.scenePlan}
+                            </div>
+                          )}
+                          
+                          {scene.captions && (
+                            <div className="text-sm text-zinc-300 border-t border-zinc-800 pt-2">
+                              <span className="text-zinc-500 block mb-1">Captions:</span>
+                              {scene.captions}
+                            </div>
+                          )}
+                          
+                          <div className="flex gap-2 pt-2 border-t border-zinc-800">
+                            {scene.imageUrl && (
+                              <div className="h-16 w-16 rounded overflow-hidden bg-zinc-900 border border-zinc-800">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={scene.imageUrl} alt={`Scene ${idx + 1}`} className="h-full w-full object-cover" />
+                              </div>
+                            )}
+                            {scene.audioUrl && (
+                              <div className="flex-1 flex items-center px-3 rounded bg-zinc-900 border border-zinc-800">
+                                <audio src={scene.audioUrl} controls className="h-8 w-full" />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </CardContent>
-              <CardFooter className="flex gap-3">
+              <CardFooter className="flex flex-wrap gap-3">
+                <Button variant="outline" className="flex-1 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white" onClick={handleGenerateScenePlan}>
+                  <ListTree className="mr-2 h-4 w-4" />
+                  Scene Plan
+                </Button>
                 <Button variant="outline" className="flex-1 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white" onClick={handleGenerateVisuals}>
                   <ImageIcon className="mr-2 h-4 w-4" />
-                  Generate Visuals
+                  Visuals
                 </Button>
                 <Button variant="outline" className="flex-1 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white" onClick={handleGenerateVoice}>
                   <Mic className="mr-2 h-4 w-4" />
-                  Generate Voice
+                  Voice
+                </Button>
+                <Button variant="outline" className="flex-1 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white" onClick={handleGenerateCaptions}>
+                  <Type className="mr-2 h-4 w-4" />
+                  Captions
                 </Button>
               </CardFooter>
             </Card>
             
             <Card className="bg-zinc-900 border-zinc-800 overflow-hidden">
-              <div className="aspect-video bg-zinc-950 flex flex-col items-center justify-center relative group cursor-pointer border-b border-zinc-800">
-                <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <div className="h-16 w-16 rounded-full bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-                    <Play className="h-8 w-8 text-white ml-1" />
-                  </div>
-                </div>
-                <Video className="h-12 w-12 text-zinc-800 mb-4" />
-                <p className="text-zinc-500 font-medium">Preview will appear here</p>
+              <div className="aspect-video bg-zinc-950 flex flex-col items-center justify-center relative group border-b border-zinc-800">
+                {videoUrl ? (
+                  <video src={videoUrl} controls className="w-full h-full object-contain" />
+                ) : (
+                  <>
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                      <div className="h-16 w-16 rounded-full bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                        <Play className="h-8 w-8 text-white ml-1" />
+                      </div>
+                    </div>
+                    <Video className="h-12 w-12 text-zinc-800 mb-4" />
+                    <p className="text-zinc-500 font-medium">Preview will appear here</p>
+                  </>
+                )}
               </div>
-              <div className="p-4 bg-zinc-900 flex justify-between items-center">
-                 <div className="text-sm text-zinc-400">Project ID: <span className="font-mono text-zinc-500">{currentProjectId}</span></div>
-                 <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={() => toast.success('Video rendering started!')}>Render Final Video</Button>
+              <div className="p-4 bg-zinc-900 flex flex-col gap-4">
+                 <div className="flex justify-between items-center">
+                   <div className="text-sm text-zinc-400">Project ID: <span className="font-mono text-zinc-500">{currentProjectId}</span></div>
+                   <Button 
+                     size="sm" 
+                     className="bg-indigo-600 hover:bg-indigo-700 text-white" 
+                     onClick={handleRenderVideo}
+                     disabled={renderStatus === 'queued' || renderStatus === 'processing'}
+                   >
+                     {renderStatus === 'queued' || renderStatus === 'processing' ? (
+                       <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Rendering...</>
+                     ) : (
+                       'Render Final Video'
+                     )}
+                   </Button>
+                 </div>
+                 
+                 {(renderStatus === 'queued' || renderStatus === 'processing' || renderStatus === 'completed') && renderProgress !== null && (
+                   <div className="space-y-2">
+                     <div className="flex justify-between text-xs text-zinc-400">
+                       <span>{renderStatus === 'completed' ? 'Rendering Complete' : 'Rendering Progress'}</span>
+                       <span>{renderProgress}%</span>
+                     </div>
+                     <div className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden">
+                       <div 
+                         className="h-full bg-indigo-500 transition-all duration-500 ease-out"
+                         style={{ width: `${renderProgress}%` }}
+                       />
+                     </div>
+                   </div>
+                 )}
               </div>
             </Card>
           </div>

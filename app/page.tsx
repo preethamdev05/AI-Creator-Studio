@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/components/auth-provider';
-import { signInWithGoogle, logOut } from '@/lib/firebase';
+import { db, signInWithGoogle, logOut } from '@/lib/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
-import { Video, LayoutDashboard, Folder, Library, Settings as SettingsIcon, Loader2, LogOut } from 'lucide-react';
+import { Video, LayoutDashboard, Folder, Library, Settings as SettingsIcon, Loader2, LogOut, Coins } from 'lucide-react';
 import { toast } from 'sonner';
 import { StudioTab } from '@/components/studio-tab';
 import { ProjectsTab } from '@/components/projects-tab';
@@ -14,6 +15,17 @@ import { SettingsTab } from '@/components/settings-tab';
 export default function Home() {
   const { user, loading, isAuthReady } = useAuth();
   const [activeTab, setActiveTab] = useState('studio');
+  const [credits, setCredits] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsubscribe = onSnapshot(doc(db, 'users', user.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        setCredits(docSnap.data().credits);
+      }
+    });
+    return () => unsubscribe();
+  }, [user]);
 
   if (loading || !isAuthReady) {
     return (
@@ -89,7 +101,14 @@ export default function Home() {
           ))}
         </nav>
 
-        <div className="p-4 border-t border-zinc-800/50">
+        <div className="p-4 border-t border-zinc-800/50 space-y-4">
+          <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-zinc-900/50 border border-zinc-800">
+            <div className="flex items-center gap-2">
+              <Coins className="h-4 w-4 text-yellow-500" />
+              <span className="text-sm font-medium text-zinc-300">Credits</span>
+            </div>
+            <span className="text-sm font-bold text-white">{credits !== null ? credits : '...'}</span>
+          </div>
           <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-zinc-900/50 border border-zinc-800">
             <div className="h-8 w-8 rounded-full bg-zinc-800 flex items-center justify-center text-xs font-medium text-zinc-400">
               {user.email?.charAt(0).toUpperCase()}
@@ -115,9 +134,15 @@ export default function Home() {
             </div>
             <span className="font-semibold text-lg tracking-tight">Studio</span>
           </div>
-          <Button variant="ghost" size="icon" onClick={logOut} className="text-zinc-400 hover:text-white">
-            <LogOut className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 mr-2">
+              <Coins className="h-3.5 w-3.5 text-yellow-500" />
+              <span className="text-xs font-bold text-white">{credits !== null ? credits : '...'}</span>
+            </div>
+            <Button variant="ghost" size="icon" onClick={logOut} className="text-zinc-400 hover:text-white">
+              <LogOut className="h-4 w-4" />
+            </Button>
+          </div>
         </header>
 
         {/* Mobile Navigation */}
