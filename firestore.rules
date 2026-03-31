@@ -1,0 +1,267 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required, immutable)
+    //   - email: string (required)
+    //   - displayName: string (optional)
+    //   - photoURL: string (optional)
+    //   - role: string (required, enum: ['admin', 'user'])
+    //   - credits: number (required)
+    //   - createdAt: string (required, immutable)
+    //
+    // Collection: projects
+    // Document ID: {projectId}
+    // Fields:
+    //   - id: string (required, immutable)
+    //   - ownerId: string (required, immutable)
+    //   - title: string (required)
+    //   - prompt: string (optional)
+    //   - status: string (required, enum: ['draft', 'generating', 'completed', 'failed'])
+    //   - stylePreset: string (optional)
+    //   - aspectRatio: string (optional, enum: ['9:16', '1:1', '16:9'])
+    //   - createdAt: string (required, immutable)
+    //   - updatedAt: string (required)
+    //
+    // Collection: scenes
+    // Document ID: {sceneId}
+    // Fields:
+    //   - id: string (required, immutable)
+    //   - projectId: string (required, immutable)
+    //   - ownerId: string (required, immutable)
+    //   - order: number (required)
+    //   - script: string (required)
+    //   - imagePrompt: string (optional)
+    //   - voicePrompt: string (optional)
+    //   - imageUrl: string (optional)
+    //   - audioUrl: string (optional)
+    //   - videoUrl: string (optional)
+    //   - status: string (required, enum: ['pending', 'generating', 'completed', 'failed'])
+    //
+    // Collection: assets
+    // Document ID: {assetId}
+    // Fields:
+    //   - id: string (required, immutable)
+    //   - ownerId: string (required, immutable)
+    //   - projectId: string (required, immutable)
+    //   - type: string (required, enum: ['image', 'audio', 'video'])
+    //   - url: string (required)
+    //   - createdAt: string (required, immutable)
+    //
+    // Collection: jobs
+    // Document ID: {jobId}
+    // Fields:
+    //   - id: string (required, immutable)
+    //   - ownerId: string (required, immutable)
+    //   - projectId: string (required, immutable)
+    //   - type: string (required, enum: ['ai_script', 'ai_scene_plan', 'ai_visuals', 'ai_voice', 'ai_captions', 'ffmpeg_render'])
+    //   - status: string (required, enum: ['queued', 'processing', 'completed', 'failed'])
+    //   - result: string (optional)
+    //   - createdAt: string (required, immutable)
+    //   - updatedAt: string (required)
+    //
+    // Collection: style_profiles
+    // Document ID: {profileId}
+    // Fields:
+    //   - id: string (required, immutable)
+    //   - ownerId: string (required, immutable)
+    //   - name: string (required)
+    //   - description: string (optional)
+    //   - visualStyle: string (optional)
+    //   - voiceStyle: string (optional)
+    //   - createdAt: string (required, immutable)
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+        (request.auth.token.email == "preetham.dev.05@gmail.com" && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.ownerId;
+    }
+
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid;
+    }
+
+    function ownerIdUnchanged() {
+      return !('ownerId' in request.resource.data) || request.resource.data.ownerId == request.auth.uid;
+    }
+
+    function ownerIdNotModified() {
+      return !('ownerId' in request.resource.data) || request.resource.data.ownerId == resource.data.ownerId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      let allowedFields = ['uid', 'email', 'displayName', 'photoURL', 'role', 'credits', 'createdAt'];
+      return hasOnlyAllowedFields(allowedFields) &&
+             hasRequiredFields(['uid', 'email', 'role', 'credits', 'createdAt']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128 &&
+             isValidEmail(data.email) &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1000)) &&
+             data.role in ['admin', 'user'] &&
+             data.credits is number && data.credits >= 0 &&
+             data.createdAt is string && data.createdAt.size() <= 50;
+    }
+
+    function isValidProject(data) {
+      let allowedFields = ['id', 'ownerId', 'title', 'prompt', 'status', 'stylePreset', 'aspectRatio', 'createdAt', 'updatedAt'];
+      return hasOnlyAllowedFields(allowedFields) &&
+             hasRequiredFields(['id', 'ownerId', 'title', 'status', 'createdAt', 'updatedAt']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.ownerId is string && data.ownerId.size() > 0 && data.ownerId.size() <= 128 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             (!('prompt' in data) || (data.prompt is string && data.prompt.size() <= 5000)) &&
+             data.status in ['draft', 'generating', 'completed', 'failed'] &&
+             (!('stylePreset' in data) || (data.stylePreset is string && data.stylePreset.size() <= 100)) &&
+             (!('aspectRatio' in data) || data.aspectRatio in ['9:16', '1:1', '16:9']) &&
+             data.createdAt is string && data.createdAt.size() <= 50 &&
+             data.updatedAt is string && data.updatedAt.size() <= 50;
+    }
+
+    function isValidScene(data) {
+      let allowedFields = ['id', 'projectId', 'ownerId', 'order', 'script', 'imagePrompt', 'voicePrompt', 'imageUrl', 'audioUrl', 'videoUrl', 'status'];
+      return hasOnlyAllowedFields(allowedFields) &&
+             hasRequiredFields(['id', 'projectId', 'ownerId', 'order', 'script', 'status']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 128 &&
+             data.ownerId is string && data.ownerId.size() > 0 && data.ownerId.size() <= 128 &&
+             data.order is number && data.order >= 0 &&
+             data.script is string && data.script.size() <= 5000 &&
+             (!('imagePrompt' in data) || (data.imagePrompt is string && data.imagePrompt.size() <= 5000)) &&
+             (!('voicePrompt' in data) || (data.voicePrompt is string && data.voicePrompt.size() <= 5000)) &&
+             (!('imageUrl' in data) || (isValidUrl(data.imageUrl) && data.imageUrl.size() <= 1000)) &&
+             (!('audioUrl' in data) || (isValidUrl(data.audioUrl) && data.audioUrl.size() <= 1000)) &&
+             (!('videoUrl' in data) || (isValidUrl(data.videoUrl) && data.videoUrl.size() <= 1000)) &&
+             data.status in ['pending', 'generating', 'completed', 'failed'];
+    }
+
+    function isValidAsset(data) {
+      let allowedFields = ['id', 'ownerId', 'projectId', 'type', 'url', 'createdAt'];
+      return hasOnlyAllowedFields(allowedFields) &&
+             hasRequiredFields(['id', 'ownerId', 'projectId', 'type', 'url', 'createdAt']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.ownerId is string && data.ownerId.size() > 0 && data.ownerId.size() <= 128 &&
+             data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 128 &&
+             data.type in ['image', 'audio', 'video'] &&
+             isValidUrl(data.url) && data.url.size() <= 1000 &&
+             data.createdAt is string && data.createdAt.size() <= 50;
+    }
+
+    function isValidJob(data) {
+      let allowedFields = ['id', 'ownerId', 'projectId', 'type', 'status', 'result', 'createdAt', 'updatedAt'];
+      return hasOnlyAllowedFields(allowedFields) &&
+             hasRequiredFields(['id', 'ownerId', 'projectId', 'type', 'status', 'createdAt', 'updatedAt']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.ownerId is string && data.ownerId.size() > 0 && data.ownerId.size() <= 128 &&
+             data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 128 &&
+             data.type in ['ai_script', 'ai_scene_plan', 'ai_visuals', 'ai_voice', 'ai_captions', 'ffmpeg_render'] &&
+             data.status in ['queued', 'processing', 'completed', 'failed'] &&
+             (!('result' in data) || (data.result is string && data.result.size() <= 10000)) &&
+             data.createdAt is string && data.createdAt.size() <= 50 &&
+             data.updatedAt is string && data.updatedAt.size() <= 50;
+    }
+
+    function isValidStyleProfile(data) {
+      let allowedFields = ['id', 'ownerId', 'name', 'description', 'visualStyle', 'voiceStyle', 'createdAt'];
+      return hasOnlyAllowedFields(allowedFields) &&
+             hasRequiredFields(['id', 'ownerId', 'name', 'createdAt']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.ownerId is string && data.ownerId.size() > 0 && data.ownerId.size() <= 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 1000)) &&
+             (!('visualStyle' in data) || (data.visualStyle is string && data.visualStyle.size() <= 5000)) &&
+             (!('voiceStyle' in data) || (data.voiceStyle is string && data.voiceStyle.size() <= 5000)) &&
+             data.createdAt is string && data.createdAt.size() <= 50;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && uidUnchanged() && ((isOwner(userId) && request.resource.data.role == 'user') || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && uidNotModified() && request.resource.data.createdAt == resource.data.createdAt && ((isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.credits == resource.data.credits) || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /projects/{projectId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidProject(request.resource.data) && ownerIdUnchanged() && (isDocOwner() || isAdmin());
+      allow update: if isAuthenticated() && isValidProject(request.resource.data) && ownerIdNotModified() && request.resource.data.createdAt == resource.data.createdAt && request.resource.data.id == resource.data.id && (isDocOwner() || isAdmin());
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /scenes/{sceneId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidScene(request.resource.data) && ownerIdUnchanged() && (isDocOwner() || isAdmin());
+      allow update: if isAuthenticated() && isValidScene(request.resource.data) && ownerIdNotModified() && request.resource.data.id == resource.data.id && request.resource.data.projectId == resource.data.projectId && (isDocOwner() || isAdmin());
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /assets/{assetId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidAsset(request.resource.data) && ownerIdUnchanged() && (isDocOwner() || isAdmin());
+      allow update: if isAuthenticated() && isValidAsset(request.resource.data) && ownerIdNotModified() && request.resource.data.createdAt == resource.data.createdAt && request.resource.data.id == resource.data.id && request.resource.data.projectId == resource.data.projectId && (isDocOwner() || isAdmin());
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /jobs/{jobId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidJob(request.resource.data) && ownerIdUnchanged() && (isDocOwner() || isAdmin());
+      allow update: if isAuthenticated() && isValidJob(request.resource.data) && ownerIdNotModified() && request.resource.data.createdAt == resource.data.createdAt && request.resource.data.id == resource.data.id && request.resource.data.projectId == resource.data.projectId && (isDocOwner() || isAdmin());
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /style_profiles/{profileId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidStyleProfile(request.resource.data) && ownerIdUnchanged() && (isDocOwner() || isAdmin());
+      allow update: if isAuthenticated() && isValidStyleProfile(request.resource.data) && ownerIdNotModified() && request.resource.data.createdAt == resource.data.createdAt && request.resource.data.id == resource.data.id && (isDocOwner() || isAdmin());
+      allow delete: if isDocOwner() || isAdmin();
+    }
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and account settings",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "credits": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "credits", "createdAt"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "A video generation project",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "title": { "type": "string" },
+        "prompt": { "type": "string" },
+        "status": { "type": "string", "enum": ["draft", "generating", "completed", "failed"] },
+        "stylePreset": { "type": "string" },
+        "aspectRatio": { "type": "string", "enum": ["9:16", "1:1", "16:9"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "title", "status", "createdAt", "updatedAt"]
+    },
+    "Scene": {
+      "title": "Scene",
+      "description": "A scene within a project",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "order": { "type": "number" },
+        "script": { "type": "string" },
+        "imagePrompt": { "type": "string" },
+        "voicePrompt": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "audioUrl": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "generating", "completed", "failed"] }
+      },
+      "required": ["id", "projectId", "ownerId", "order", "script", "status"]
+    },
+    "Asset": {
+      "title": "Asset",
+      "description": "Generated media asset",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "projectId": { "type": "string" },
+        "type": { "type": "string", "enum": ["image", "audio", "video"] },
+        "url": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "projectId", "type", "url", "createdAt"]
+    },
+    "Job": {
+      "title": "Job",
+      "description": "Background processing job",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "projectId": { "type": "string" },
+        "type": { "type": "string", "enum": ["ai_script", "ai_scene_plan", "ai_visuals", "ai_voice", "ai_captions", "ffmpeg_render"] },
+        "status": { "type": "string", "enum": ["queued", "processing", "completed", "failed"] },
+        "result": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "projectId", "type", "status", "createdAt", "updatedAt"]
+    },
+    "StyleProfile": {
+      "title": "Style Profile",
+      "description": "User-defined style preset",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "visualStyle": { "type": "string" },
+        "voiceStyle": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "name", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/Project" },
+      "description": "Video projects"
+    },
+    "/scenes/{sceneId}": {
+      "schema": { "$ref": "#/entities/Scene" },
+      "description": "Scenes within projects"
+    },
+    "/assets/{assetId}": {
+      "schema": { "$ref": "#/entities/Asset" },
+      "description": "Generated media assets"
+    },
+    "/jobs/{jobId}": {
+      "schema": { "$ref": "#/entities/Job" },
+      "description": "Background processing jobs"
+    },
+    "/style_profiles/{profileId}": {
+      "schema": { "$ref": "#/entities/StyleProfile" },
+      "description": "User-defined style presets"
+    }
+  }
+}

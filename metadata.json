@@ -1,0 +1,5 @@
+{
+  "name": "AI Creator Studio",
+  "description": "A full-stack multimodal AI content generation system that converts a single prompt into fully produced video assets.",
+  "requestFramePermissions": []
+}
