@@ -9,6 +9,13 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
 // Suppress benign Firestore idle stream warnings
 setLogLevel('error');
+const originalConsoleError = console.error;
+console.error = (...args) => {
+  if (typeof args[0] === 'string' && args[0].includes("GrpcConnection RPC 'Listen' stream") && args[0].includes("CANCELLED: Disconnecting idle stream")) {
+    return;
+  }
+  originalConsoleError(...args);
+};
 
 export const googleProvider = new GoogleAuthProvider();
 

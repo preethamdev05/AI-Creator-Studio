@@ -18,5 +18,13 @@ if (!admin.apps.length) {
   }
 }
 
+const originalConsoleError = console.error;
+console.error = (...args) => {
+  if (typeof args[0] === 'string' && args[0].includes("GrpcConnection RPC 'Listen' stream") && args[0].includes("CANCELLED: Disconnecting idle stream")) {
+    return;
+  }
+  originalConsoleError(...args);
+};
+
 export const getAdminDb = () => admin.firestore();
 export const getAdminAuth = () => admin.auth();
