@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { db } from '@/lib/firebase';
-import { collection, doc, setDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, getDocs, query, where } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '@/lib/firestore-utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,6 +21,80 @@ export function StudioTab() {
   const [generatedScript, setGeneratedScript] = useState('');
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
 
+  const handleGenerateVisuals = async () => {
+    if (!currentProjectId) return;
+    toast.info('Queuing visual generation...');
+    try {
+      // Get the first scene for this project
+      const scenesSnapshot = await getDocs(query(collection(db, 'scenes'), where('projectId', '==', currentProjectId)));
+      if (scenesSnapshot.empty) {
+        toast.error('No scenes found to generate visuals for.');
+        return;
+      }
+      
+      const sceneDoc = scenesSnapshot.docs[0];
+      const sceneData = sceneDoc.data();
+      
+      const jobRef = doc(collection(db, 'jobs'));
+      await setDoc(jobRef, {
+        id: jobRef.id,
+        projectId: currentProjectId,
+        ownerId: user?.uid,
+        type: 'ai_visuals',
+        status: 'queued',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        payload: JSON.stringify({
+          sceneId: sceneDoc.id,
+          imagePrompt: sceneData.imagePrompt || sceneData.script,
+        }),
+      }).catch(e => handleFirestoreError(e, OperationType.CREATE, 'jobs'));
+
+      // Trigger processing
+      fetch('/api/jobs/process', { method: 'POST' });
+      toast.success('Visual generation queued!');
+    } catch (error: any) {
+      console.error(error);
+      toast.error('Failed to queue visual generation');
+    }
+  };
+
+  const handleGenerateVoice = async () => {
+    if (!currentProjectId) return;
+    toast.info('Queuing voice synthesis...');
+    try {
+      const scenesSnapshot = await getDocs(query(collection(db, 'scenes'), where('projectId', '==', currentProjectId)));
+      if (scenesSnapshot.empty) {
+        toast.error('No scenes found to generate voice for.');
+        return;
+      }
+      
+      const sceneDoc = scenesSnapshot.docs[0];
+      const sceneData = sceneDoc.data();
+      
+      const jobRef = doc(collection(db, 'jobs'));
+      await setDoc(jobRef, {
+        id: jobRef.id,
+        projectId: currentProjectId,
+        ownerId: user?.uid,
+        type: 'ai_voice',
+        status: 'queued',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        payload: JSON.stringify({
+          sceneId: sceneDoc.id,
+          voicePrompt: sceneData.voicePrompt || sceneData.script,
+        }),
+      }).catch(e => handleFirestoreError(e, OperationType.CREATE, 'jobs'));
+
+      // Trigger processing
+      fetch('/api/jobs/process', { method: 'POST' });
+      toast.success('Voice synthesis queued!');
+    } catch (error: any) {
+      console.error(error);
+      toast.error('Failed to queue voice synthesis');
+    }
+  };
   const handleGenerate = async () => {
     if (!prompt.trim()) {
       toast.error('Please enter a prompt');
@@ -30,53 +104,46 @@ export function StudioTab() {
     
     setIsGenerating(true);
     try {
-      // 1. Create Project Document
-      const projectRef = doc(collection(db, 'projects'));
-      const projectId = projectRef.id;
+      const token = await user.getIdToken();
       
-      const projectData = {
-        id: projectId,
-        ownerId: user.uid,
-        title: prompt.slice(0, 40) + (prompt.length > 40 ? '...' : ''),
-        prompt: prompt,
-        status: 'generating',
-        stylePreset: style,
-        aspectRatio: aspectRatio,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
+      const response = await fetch('/api/projects', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          prompt,
+          style,
+          aspectRatio
+        })
+      });
 
-      await setDoc(projectRef, projectData).catch(e => handleFirestoreError(e, OperationType.CREATE, 'projects'));
-      setCurrentProjectId(projectId);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create project');
+      }
 
-      // 2. Simulate AI Generation Delay
-      await new Promise(resolve => setTimeout(resolve, 2500));
-      
-      const script = `[SCENE 1]\nVisual: A cinematic wide shot of ${prompt}\nAudio: "Welcome to the future of content creation."\n\n[SCENE 2]\nVisual: Close up details.\nAudio: "Everything you imagine, brought to life."`;
-      setGeneratedScript(script);
+      const data = await response.json();
+      setCurrentProjectId(data.projectId);
 
-      // 3. Update Project Status
-      await setDoc(projectRef, {
-        ...projectData,
-        status: 'draft',
-        updatedAt: new Date().toISOString(),
-      }).catch(e => handleFirestoreError(e, OperationType.UPDATE, 'projects'));
+      // Trigger job processing
+      toast.info('Processing script generation...');
+      const processResponse = await fetch('/api/jobs/process', {
+        method: 'POST',
+      });
 
-      // 4. Create Initial Scene Document
-      const sceneRef = doc(collection(db, 'scenes'));
-      await setDoc(sceneRef, {
-        id: sceneRef.id,
-        projectId: projectId,
-        ownerId: user.uid,
-        order: 0,
-        script: script,
-        status: 'pending'
-      }).catch(e => handleFirestoreError(e, OperationType.CREATE, 'scenes'));
+      if (!processResponse.ok) {
+        throw new Error('Failed to process job');
+      }
 
+      // Fetch the generated scenes to display
+      // For now, we'll just show a success message
       toast.success('Script generated successfully! Project saved.');
-    } catch (error) {
+      setGeneratedScript('Script generation completed. Check the Projects tab for details.');
+    } catch (error: any) {
       console.error(error);
-      toast.error('Failed to generate script');
+      toast.error(error.message || 'Failed to generate script');
     } finally {
       setIsGenerating(false);
     }
@@ -171,11 +238,11 @@ export function StudioTab() {
                 </div>
               </CardContent>
               <CardFooter className="flex gap-3">
-                <Button variant="outline" className="flex-1 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white" onClick={() => toast.info('Visual generation queued.')}>
+                <Button variant="outline" className="flex-1 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white" onClick={handleGenerateVisuals}>
                   <ImageIcon className="mr-2 h-4 w-4" />
                   Generate Visuals
                 </Button>
-                <Button variant="outline" className="flex-1 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white" onClick={() => toast.info('Voice synthesis queued.')}>
+                <Button variant="outline" className="flex-1 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white" onClick={handleGenerateVoice}>
                   <Mic className="mr-2 h-4 w-4" />
                   Generate Voice
                 </Button>

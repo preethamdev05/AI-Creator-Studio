@@ -75,6 +75,7 @@
         "projectId": { "type": "string" },
         "type": { "type": "string", "enum": ["ai_script", "ai_scene_plan", "ai_visuals", "ai_voice", "ai_captions", "ffmpeg_render"] },
         "status": { "type": "string", "enum": ["queued", "processing", "completed", "failed"] },
+        "payload": { "type": "string" },
         "result": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }

@@ -70,11 +70,18 @@ export function AssetsTab() {
           {assets.map((asset) => (
             <Card key={asset.id} className="bg-zinc-900 border-zinc-800 hover:border-zinc-700 transition-colors cursor-pointer group overflow-hidden">
               <div className="aspect-square bg-zinc-950 flex items-center justify-center relative">
-                {asset.type === 'image' && <ImageIcon className="h-8 w-8 text-zinc-700 group-hover:scale-110 transition-transform" />}
-                {asset.type === 'audio' && <Music className="h-8 w-8 text-zinc-700 group-hover:scale-110 transition-transform" />}
+                {asset.type === 'image' && (
+                  <img src={asset.url} alt="Generated asset" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                )}
+                {asset.type === 'audio' && (
+                  <div className="flex flex-col items-center gap-2">
+                    <Music className="h-8 w-8 text-zinc-700 group-hover:scale-110 transition-transform" />
+                    <audio controls src={asset.url} className="w-full max-w-[150px] h-8 mt-2" />
+                  </div>
+                )}
                 {asset.type === 'video' && <Video className="h-8 w-8 text-zinc-700 group-hover:scale-110 transition-transform" />}
                 
-                <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 backdrop-blur-md rounded text-[10px] font-medium uppercase tracking-wider text-zinc-300">
+                <div className="absolute top-2 right-2 px-2 py-1 bg-black/60 backdrop-blur-md rounded text-[10px] font-medium uppercase tracking-wider text-zinc-300">
                   {asset.type}
                 </div>
               </div>
